@@ -321,54 +321,86 @@ contract RecoveryActionTest is Test {
 
     // ==================== Cancel Escape Tests ====================
 
-    function testCancelOwnerEscape() external {
+    function testCancelOwnerEscapeRequiresBothApprovals() external {
         // Trigger owner escape
         vm.prank(owner);
         recoveryAction.triggerEscapeOwner(address(mockValidator), testData);
 
-        // Cancel escape
+        // Owner approves cancellation
+        vm.prank(owner);
+        recoveryAction.approveCancelEscape(address(mockValidator));
+
+        // Escape should still be active (only owner approved)
+        _checkEscapeRequest(address(mockValidator), true, owner, true);
+
+        // Guardian approves cancellation
         vm.expectEmit(true, true, true, true);
         emit EscapeCancelled(address(mockValidator));
 
-        vm.prank(owner);
-        recoveryAction.cancelEscape(address(mockValidator));
+        vm.prank(guardian);
+        recoveryAction.approveCancelEscape(address(mockValidator));
 
-        // Escape request should be cleared
+        // Escape request should be cleared after both approvals
         _checkEscapeRequest(address(mockValidator), false, address(0), false);
     }
 
-    function testCancelGuardianEscape() external {
+    function testCancelGuardianEscapeRequiresBothApprovals() external {
         // Trigger guardian escape
         vm.prank(guardian);
         recoveryAction.triggerEscapeGuardian(address(mockValidator), testData);
 
-        // Cancel escape
+        // Guardian approves cancellation
+        vm.prank(guardian);
+        recoveryAction.approveCancelEscape(address(mockValidator));
+
+        // Escape should still be active (only guardian approved)
+        _checkEscapeRequest(address(mockValidator), true, guardian, false);
+
+        // Owner approves cancellation
         vm.expectEmit(true, true, true, true);
         emit EscapeCancelled(address(mockValidator));
 
-        vm.prank(guardian);
-        recoveryAction.cancelEscape(address(mockValidator));
-
-        // Escape request should be cleared
-        _checkEscapeRequest(address(mockValidator), false, address(0), false);
-    }
-
-    function testCancelEscapeByAnyParty() external {
-        // Trigger owner escape
         vm.prank(owner);
-        recoveryAction.triggerEscapeOwner(address(mockValidator), testData);
+        recoveryAction.approveCancelEscape(address(mockValidator));
 
-        // Cancel escape by guardian
-        vm.prank(guardian);
-        recoveryAction.cancelEscape(address(mockValidator));
-
-        // Escape request should be cleared
+        // Escape request should be cleared after both approvals
         _checkEscapeRequest(address(mockValidator), false, address(0), false);
     }
 
     function testCannotCancelNonExistentEscape() external {
         vm.expectRevert(RecoveryAction.NoActiveEscape.selector);
-        recoveryAction.cancelEscape(address(mockValidator));
+        recoveryAction.approveCancelEscape(address(mockValidator));
+    }
+
+    function testCancelEscapeResetsAfterNewEscape() external {
+        // Trigger owner escape
+        vm.prank(owner);
+        recoveryAction.triggerEscapeOwner(address(mockValidator), testData);
+
+        // Owner approves cancellation
+        vm.prank(owner);
+        recoveryAction.approveCancelEscape(address(mockValidator));
+
+        // Trigger a new escape (should reset approvals)
+        vm.prank(guardian);
+        recoveryAction.triggerEscapeGuardian(address(mockValidator), testData);
+
+        // Guardian approves cancellation
+        vm.prank(guardian);
+        recoveryAction.approveCancelEscape(address(mockValidator));
+
+        // Escape should still be active (only guardian approved for new escape)
+        _checkEscapeRequest(address(mockValidator), true, guardian, false);
+
+        // Owner approves cancellation
+        vm.expectEmit(true, true, true, true);
+        emit EscapeCancelled(address(mockValidator));
+
+        vm.prank(owner);
+        recoveryAction.approveCancelEscape(address(mockValidator));
+
+        // Escape request should be cleared after both approvals
+        _checkEscapeRequest(address(mockValidator), false, address(0), false);
     }
 
     // ==================== Override Guardian Escape Tests ====================

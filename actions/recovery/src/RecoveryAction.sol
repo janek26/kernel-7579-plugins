@@ -23,6 +23,8 @@ contract RecoveryAction {
     error NotEscapeInitiator();
     error CannotOverrideOwnerEscape();
     error InvalidSecurityPeriod();
+    error NotOwnerOrGuardian();
+    error RequiresOwnerAndGuardianApproval();
 
     // State variables
     uint256 public securityPeriod = 7 days; // Default security period is 7 days
@@ -38,6 +40,10 @@ contract RecoveryAction {
 
     // Mapping from validator address to escape request
     mapping(address => EscapeRequest) public escapeRequests;
+
+    // Mapping to track cancel approvals (validator => role => approved)
+    // role: true = owner, false = guardian
+    mapping(address => mapping(bool => bool)) public cancelApprovals;
 
     /**
      * @notice Set the security period for escapes
@@ -64,6 +70,10 @@ contract RecoveryAction {
             securityPeriodSnapshot: securityPeriod
         });
 
+        // Reset any cancel approvals for this validator
+        cancelApprovals[_validator][true] = false;
+        cancelApprovals[_validator][false] = false;
+
         emit EscapeTriggered(_validator, msg.sender, true);
     }
 
@@ -81,6 +91,10 @@ contract RecoveryAction {
             active: true,
             securityPeriodSnapshot: securityPeriod
         });
+
+        // Reset any cancel approvals for this validator
+        cancelApprovals[_validator][true] = false;
+        cancelApprovals[_validator][false] = false;
 
         emit EscapeTriggered(_validator, msg.sender, false);
     }
@@ -138,18 +152,39 @@ contract RecoveryAction {
     }
 
     /**
-     * @notice Cancel an active escape
+     * @notice Approve cancellation of an escape (requires both owner and guardian approval)
      * @param _validator Address of the validator
      */
-    function cancelEscape(address _validator) external {
+    function approveCancelEscape(address _validator) external {
         EscapeRequest storage request = escapeRequests[_validator];
-
+        
         if (!request.active) revert NoActiveEscape();
-
-        // Clear the escape request
-        delete escapeRequests[_validator];
-
-        emit EscapeCancelled(_validator);
+        
+        // Determine if caller is owner or guardian based on the escape request
+        bool isCallerOwner;
+        
+        if (request.isOwnerInitiated) {
+            // If owner initiated, the initiator is the owner
+            isCallerOwner = (msg.sender == request.initiator);
+        } else {
+            // If guardian initiated, the initiator is the guardian
+            isCallerOwner = (msg.sender != request.initiator);
+        }
+        
+        // Record the approval
+        cancelApprovals[_validator][isCallerOwner] = true;
+        
+        // If both owner and guardian have approved, cancel the escape
+        if (cancelApprovals[_validator][true] && cancelApprovals[_validator][false]) {
+            // Clear the escape request
+            delete escapeRequests[_validator];
+            
+            // Clear the approvals
+            cancelApprovals[_validator][true] = false;
+            cancelApprovals[_validator][false] = false;
+            
+            emit EscapeCancelled(_validator);
+        }
     }
 
     /**

@@ -26,7 +26,7 @@ The system is asymmetric in favor of the owner, who can override an escape trigg
 | Trigger Escape Guardian  |       | X        | Initiates recovery process as guardian             |
 | Escape Owner             | X     |          | Completes owner-initiated escape after timelock    |
 | Escape Guardian          |       | X        | Completes guardian-initiated escape after timelock |
-| Cancel Escape            | X     | X        | Can be called by anyone                            |
+| Cancel Escape            | X     | X        | Requires approval from both owner and guardian     |
 | Override Guardian Escape | X     |          | Owner can override guardian-initiated escape       |
 | Set Security Period      | X     | X        | Changes the timelock duration                      |
 
@@ -39,7 +39,7 @@ The system is asymmetric in favor of the owner, who can override an escape trigg
 
 During the waiting period, the escape can be:
 
-- Cancelled by anyone
+- Cancelled with approval from both owner and guardian
 - Overridden by the owner (if initiated by a guardian)
 - Replaced by a new escape (which resets the waiting period)
 
@@ -100,10 +100,10 @@ The Recovery Action includes comprehensive tests that verify all aspects of its 
 
 ### Cancel Escape Tests
 
-- `testCancelOwnerEscape`: Verifies owner escapes can be cancelled
-- `testCancelGuardianEscape`: Verifies guardian escapes can be cancelled
-- `testCancelEscapeByAnyParty`: Ensures any party can cancel an escape
+- `testCancelOwnerEscapeRequiresBothApprovals`: Verifies owner escapes require both owner and guardian approval to cancel
+- `testCancelGuardianEscapeRequiresBothApprovals`: Verifies guardian escapes require both owner and guardian approval to cancel
 - `testCannotCancelNonExistentEscape`: Verifies non-existent escapes cannot be cancelled
+- `testCancelEscapeResetsAfterNewEscape`: Verifies cancel approvals are reset when a new escape is triggered
 
 ### Override Guardian Escape Tests
 
