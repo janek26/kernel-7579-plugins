@@ -6,7 +6,7 @@ The Recovery Action is a plugin for Kernel v3 accounts that implements a secure 
 
 The Recovery Action allows both owners and guardians to initiate an "escape" process that, after a security period, enables them to replace a validator. This provides a balance between security and recoverability, ensuring that users can regain access to their accounts in case of key loss while maintaining protection against unauthorized access.
 
-By default, the security period is set to 7 days, but it can be customized by the user. This timelock provides a window during which the escape can be cancelled or overridden, adding an additional layer of security.
+By default, the security period is set to 7 days, but it can be customized by the user with a minimum of 10 minutes. This timelock provides a window during which the escape can be cancelled or overridden, adding an additional layer of security. Additionally, a 12-hour cooldown period between escape attempts prevents spam attacks.
 
 The system is asymmetric in favor of the owner, who can override an escape triggered by a guardian, but not vice versa. This design choice reflects the assumption that the owner is the primary controller of the account.
 
@@ -16,7 +16,8 @@ The system is asymmetric in favor of the owner, who can override an escape trigg
 - **Timelock security**: A mandatory waiting period before recovery can be completed
 - **Escape expiration**: Escapes expire if not completed within a certain timeframe
 - **Override capability**: Owners can override guardian-initiated escapes
-- **Cancellation**: Any active escape can be cancelled
+- **Cancellation**: Any active escape can be cancelled by either party
+- **Anti-spam protection**: A mandatory cooldown period between escape attempts
 
 ## Actions and Permissions
 
@@ -26,7 +27,7 @@ The system is asymmetric in favor of the owner, who can override an escape trigg
 | Trigger Escape Guardian  |       | X        | Initiates recovery process as guardian             |
 | Escape Owner             | X     |          | Completes owner-initiated escape after timelock    |
 | Escape Guardian          |       | X        | Completes guardian-initiated escape after timelock |
-| Cancel Escape            | X     | X        | Requires approval from both owner and guardian     |
+| Cancel Escape            | X     | X        | Either party can cancel an active escape           |
 | Override Guardian Escape | X     |          | Owner can override guardian-initiated escape       |
 | Set Security Period      | X     | X        | Changes the timelock duration                      |
 
@@ -39,7 +40,7 @@ The system is asymmetric in favor of the owner, who can override an escape trigg
 
 During the waiting period, the escape can be:
 
-- Cancelled with approval from both owner and guardian
+- Cancelled by either the owner or guardian
 - Overridden by the owner (if initiated by a guardian)
 - Replaced by a new escape (which resets the waiting period)
 
@@ -58,7 +59,14 @@ The Recovery Action implements the recovery process through a state machine patt
    - Active status flag
    - Security period snapshot (to handle period changes)
 
-2. When completing an escape, the contract:
+2. Escape timestamps are tracked to enforce cooldown periods:
+
+   - Last owner escape attempt
+   - Last guardian escape attempt
+   - Last owner trigger escape attempt
+   - Last guardian trigger escape attempt
+
+3. When completing an escape, the contract:
    - Verifies the escape is active and not expired
    - Confirms the caller is the initiator
    - Ensures the security period has elapsed
@@ -72,6 +80,8 @@ The Recovery Action implements the recovery process through a state machine patt
 - Only the initiator can complete an escape
 - Owner can override guardian-initiated escapes, providing asymmetric control
 - Security period changes do not affect active escapes, which use their snapshot value
+- A mandatory cooldown period (12 hours) between escape attempts prevents spam attacks
+- Minimum security period (10 minutes) ensures a reasonable timelock
 
 ## Tests
 
@@ -80,7 +90,8 @@ The Recovery Action includes comprehensive tests that verify all aspects of its 
 ### Security Period Tests
 
 - `testSetSecurityPeriod`: Verifies that the security period can be updated
-- `testCannotSetZeroSecurityPeriod`: Ensures the security period cannot be set to zero
+- `testCannotSetBelowMinSecurityPeriod`: Ensures the security period cannot be set below the minimum
+- `testCanSetMinSecurityPeriod`: Verifies that the security period can be set to the minimum value
 
 ### Owner Escape Tests
 
@@ -100,10 +111,9 @@ The Recovery Action includes comprehensive tests that verify all aspects of its 
 
 ### Cancel Escape Tests
 
-- `testCancelOwnerEscapeRequiresBothApprovals`: Verifies owner escapes require both owner and guardian approval to cancel
-- `testCancelGuardianEscapeRequiresBothApprovals`: Verifies guardian escapes require both owner and guardian approval to cancel
+- `testCancelOwnerEscape`: Verifies owner can cancel an owner-initiated escape
+- `testCancelGuardianEscape`: Verifies guardian can cancel a guardian-initiated escape
 - `testCannotCancelNonExistentEscape`: Verifies non-existent escapes cannot be cancelled
-- `testCancelEscapeResetsAfterNewEscape`: Verifies cancel approvals are reset when a new escape is triggered
 
 ### Override Guardian Escape Tests
 
@@ -119,6 +129,15 @@ The Recovery Action includes comprehensive tests that verify all aspects of its 
 
 - `testRevertOnInstallFailure`: Ensures recovery fails if validator installation fails
 - `testRevertOnUninstallFailure`: Ensures recovery fails if validator uninstallation fails
+
+### Escape Status Tests
+
+- `testEscapeStatusTransitions`: Verifies the correct transitions between escape states (None, NotReady, Ready, Expired)
+
+### Escape Cooldown Tests
+
+- `testCannotTriggerEscapeOwnerTooEarly`: Ensures owner cannot trigger escapes too frequently
+- `testCannotTriggerEscapeGuardianTooEarly`: Ensures guardian cannot trigger escapes too frequently
 
 ### Edge Cases Tests
 

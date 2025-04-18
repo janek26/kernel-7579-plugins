@@ -152,9 +152,20 @@ contract RecoveryActionTest is Test {
         assertEq(recoveryAction.securityPeriod(), newPeriod, "Security period not updated");
     }
 
-    function testCannotSetZeroSecurityPeriod() external {
+    function testCannotSetBelowMinSecurityPeriod() external {
+        uint256 belowMin = recoveryAction.MIN_ESCAPE_SECURITY_PERIOD() - 1;
         vm.expectRevert(RecoveryAction.InvalidSecurityPeriod.selector);
-        recoveryAction.setSecurityPeriod(0);
+        recoveryAction.setSecurityPeriod(belowMin);
+    }
+    
+    function testCanSetMinSecurityPeriod() external {
+        uint256 minPeriod = recoveryAction.MIN_ESCAPE_SECURITY_PERIOD();
+        
+        vm.expectEmit(true, true, true, true);
+        emit SecurityPeriodChanged(minPeriod);
+        
+        recoveryAction.setSecurityPeriod(minPeriod);
+        assertEq(recoveryAction.securityPeriod(), minPeriod, "Security period not updated to minimum");
     }
 
     // ==================== Owner Escape Tests ====================
@@ -169,6 +180,39 @@ contract RecoveryActionTest is Test {
         vm.stopPrank();
 
         _checkEscapeRequest(address(mockValidator), true, owner, true);
+        
+        // Check that the last owner trigger escape attempt timestamp was updated
+        assertEq(
+            recoveryAction.lastOwnerTriggerEscapeAttempt(address(mockValidator)), 
+            block.timestamp, 
+            "Last owner trigger escape attempt timestamp not updated"
+        );
+    }
+    
+    function testCannotTriggerEscapeOwnerTooEarly() external {
+        // Trigger first escape
+        vm.prank(owner);
+        recoveryAction.triggerEscapeOwner(address(mockValidator), testData);
+        
+        // Try to trigger another escape too early
+        vm.prank(owner);
+        vm.expectRevert(RecoveryAction.EscapeAttemptTooEarly.selector);
+        recoveryAction.triggerEscapeOwner(address(mockValidator), testData);
+        
+        // Advance time but not enough
+        _advanceTime(recoveryAction.TIME_BETWEEN_TWO_ESCAPES() - 1);
+        
+        // Try again, should still fail
+        vm.prank(owner);
+        vm.expectRevert(RecoveryAction.EscapeAttemptTooEarly.selector);
+        recoveryAction.triggerEscapeOwner(address(mockValidator), testData);
+        
+        // Advance time enough
+        _advanceTime(1);
+        
+        // Now it should work
+        vm.prank(owner);
+        recoveryAction.triggerEscapeOwner(address(mockValidator), testData);
     }
 
     function testEscapeOwnerBeforeSecurityPeriod() external {
@@ -208,6 +252,13 @@ contract RecoveryActionTest is Test {
 
         // Escape request should be cleared
         _checkEscapeRequest(address(mockValidator), false, address(0), false);
+        
+        // Check that the last owner escape attempt timestamp was updated
+        assertEq(
+            recoveryAction.lastOwnerEscapeAttempt(address(mockValidator)), 
+            block.timestamp, 
+            "Last owner escape attempt timestamp not updated"
+        );
     }
 
     function testEscapeOwnerAfterExpiration() external {
@@ -250,6 +301,39 @@ contract RecoveryActionTest is Test {
         vm.stopPrank();
 
         _checkEscapeRequest(address(mockValidator), true, guardian, false);
+        
+        // Check that the last guardian trigger escape attempt timestamp was updated
+        assertEq(
+            recoveryAction.lastGuardianTriggerEscapeAttempt(address(mockValidator)), 
+            block.timestamp, 
+            "Last guardian trigger escape attempt timestamp not updated"
+        );
+    }
+    
+    function testCannotTriggerEscapeGuardianTooEarly() external {
+        // Trigger first escape
+        vm.prank(guardian);
+        recoveryAction.triggerEscapeGuardian(address(mockValidator), testData);
+        
+        // Try to trigger another escape too early
+        vm.prank(guardian);
+        vm.expectRevert(RecoveryAction.EscapeAttemptTooEarly.selector);
+        recoveryAction.triggerEscapeGuardian(address(mockValidator), testData);
+        
+        // Advance time but not enough
+        _advanceTime(recoveryAction.TIME_BETWEEN_TWO_ESCAPES() - 1);
+        
+        // Try again, should still fail
+        vm.prank(guardian);
+        vm.expectRevert(RecoveryAction.EscapeAttemptTooEarly.selector);
+        recoveryAction.triggerEscapeGuardian(address(mockValidator), testData);
+        
+        // Advance time enough
+        _advanceTime(1);
+        
+        // Now it should work
+        vm.prank(guardian);
+        recoveryAction.triggerEscapeGuardian(address(mockValidator), testData);
     }
 
     function testEscapeGuardianBeforeSecurityPeriod() external {
@@ -289,6 +373,13 @@ contract RecoveryActionTest is Test {
 
         // Escape request should be cleared
         _checkEscapeRequest(address(mockValidator), false, address(0), false);
+        
+        // Check that the last guardian escape attempt timestamp was updated
+        assertEq(
+            recoveryAction.lastGuardianEscapeAttempt(address(mockValidator)), 
+            block.timestamp, 
+            "Last guardian escape attempt timestamp not updated"
+        );
     }
 
     function testEscapeGuardianAfterExpiration() external {
@@ -321,86 +412,53 @@ contract RecoveryActionTest is Test {
 
     // ==================== Cancel Escape Tests ====================
 
-    function testCancelOwnerEscapeRequiresBothApprovals() external {
+    function testCancelOwnerEscape() external {
         // Trigger owner escape
         vm.prank(owner);
         recoveryAction.triggerEscapeOwner(address(mockValidator), testData);
 
-        // Owner approves cancellation
-        vm.prank(owner);
-        recoveryAction.approveCancelEscape(address(mockValidator));
-
-        // Escape should still be active (only owner approved)
-        _checkEscapeRequest(address(mockValidator), true, owner, true);
-
-        // Guardian approves cancellation
+        // Cancel escape
         vm.expectEmit(true, true, true, true);
         emit EscapeCancelled(address(mockValidator));
 
-        vm.prank(guardian);
-        recoveryAction.approveCancelEscape(address(mockValidator));
+        vm.prank(owner);
+        recoveryAction.cancelEscape(address(mockValidator));
 
-        // Escape request should be cleared after both approvals
+        // Escape request should be cleared
         _checkEscapeRequest(address(mockValidator), false, address(0), false);
+        
+        // Escape timestamps should be reset
+        assertEq(recoveryAction.lastOwnerEscapeAttempt(address(mockValidator)), 0, "Owner escape attempt timestamp not reset");
+        assertEq(recoveryAction.lastGuardianEscapeAttempt(address(mockValidator)), 0, "Guardian escape attempt timestamp not reset");
+        assertEq(recoveryAction.lastOwnerTriggerEscapeAttempt(address(mockValidator)), 0, "Owner trigger escape attempt timestamp not reset");
+        assertEq(recoveryAction.lastGuardianTriggerEscapeAttempt(address(mockValidator)), 0, "Guardian trigger escape attempt timestamp not reset");
     }
 
-    function testCancelGuardianEscapeRequiresBothApprovals() external {
+    function testCancelGuardianEscape() external {
         // Trigger guardian escape
         vm.prank(guardian);
         recoveryAction.triggerEscapeGuardian(address(mockValidator), testData);
 
-        // Guardian approves cancellation
-        vm.prank(guardian);
-        recoveryAction.approveCancelEscape(address(mockValidator));
-
-        // Escape should still be active (only guardian approved)
-        _checkEscapeRequest(address(mockValidator), true, guardian, false);
-
-        // Owner approves cancellation
+        // Cancel escape
         vm.expectEmit(true, true, true, true);
         emit EscapeCancelled(address(mockValidator));
 
-        vm.prank(owner);
-        recoveryAction.approveCancelEscape(address(mockValidator));
+        vm.prank(guardian);
+        recoveryAction.cancelEscape(address(mockValidator));
 
-        // Escape request should be cleared after both approvals
+        // Escape request should be cleared
         _checkEscapeRequest(address(mockValidator), false, address(0), false);
+        
+        // Escape timestamps should be reset
+        assertEq(recoveryAction.lastOwnerEscapeAttempt(address(mockValidator)), 0, "Owner escape attempt timestamp not reset");
+        assertEq(recoveryAction.lastGuardianEscapeAttempt(address(mockValidator)), 0, "Guardian escape attempt timestamp not reset");
+        assertEq(recoveryAction.lastOwnerTriggerEscapeAttempt(address(mockValidator)), 0, "Owner trigger escape attempt timestamp not reset");
+        assertEq(recoveryAction.lastGuardianTriggerEscapeAttempt(address(mockValidator)), 0, "Guardian trigger escape attempt timestamp not reset");
     }
 
     function testCannotCancelNonExistentEscape() external {
         vm.expectRevert(RecoveryAction.NoActiveEscape.selector);
-        recoveryAction.approveCancelEscape(address(mockValidator));
-    }
-
-    function testCancelEscapeResetsAfterNewEscape() external {
-        // Trigger owner escape
-        vm.prank(owner);
-        recoveryAction.triggerEscapeOwner(address(mockValidator), testData);
-
-        // Owner approves cancellation
-        vm.prank(owner);
-        recoveryAction.approveCancelEscape(address(mockValidator));
-
-        // Trigger a new escape (should reset approvals)
-        vm.prank(guardian);
-        recoveryAction.triggerEscapeGuardian(address(mockValidator), testData);
-
-        // Guardian approves cancellation
-        vm.prank(guardian);
-        recoveryAction.approveCancelEscape(address(mockValidator));
-
-        // Escape should still be active (only guardian approved for new escape)
-        _checkEscapeRequest(address(mockValidator), true, guardian, false);
-
-        // Owner approves cancellation
-        vm.expectEmit(true, true, true, true);
-        emit EscapeCancelled(address(mockValidator));
-
-        vm.prank(owner);
-        recoveryAction.approveCancelEscape(address(mockValidator));
-
-        // Escape request should be cleared after both approvals
-        _checkEscapeRequest(address(mockValidator), false, address(0), false);
+        recoveryAction.cancelEscape(address(mockValidator));
     }
 
     // ==================== Override Guardian Escape Tests ====================
@@ -499,6 +557,50 @@ contract RecoveryActionTest is Test {
         recoveryAction.escapeOwner(address(revertingValidator));
     }
 
+    // ==================== Escape Status Tests ====================
+    
+    function testEscapeStatusTransitions() external {
+        // Trigger escape
+        vm.prank(owner);
+        recoveryAction.triggerEscapeOwner(address(mockValidator), testData);
+        
+        // Get the escape request
+        (, , , , bool active, uint256 securityPeriodSnapshot) = recoveryAction.escapeRequests(address(mockValidator));
+        assertTrue(active, "Escape should be active");
+        
+        // Check status is NotReady initially
+        vm.expectRevert(RecoveryAction.SecurityPeriodNotElapsed.selector);
+        vm.prank(owner);
+        recoveryAction.escapeOwner(address(mockValidator));
+        
+        // Advance time to just before security period elapses
+        _advanceTime(securityPeriodSnapshot - 1);
+        
+        // Check status is still NotReady
+        vm.expectRevert(RecoveryAction.SecurityPeriodNotElapsed.selector);
+        vm.prank(owner);
+        recoveryAction.escapeOwner(address(mockValidator));
+        
+        // Advance time to just after security period elapses
+        _advanceTime(1);
+        
+        // Check status is Ready - escape should succeed
+        vm.prank(owner);
+        recoveryAction.escapeOwner(address(mockValidator));
+        
+        // Trigger a new escape to test expiration
+        vm.prank(owner);
+        recoveryAction.triggerEscapeOwner(address(mockValidator), testData);
+        
+        // Advance time past expiration (2 * security period)
+        _advanceTime(2 * securityPeriodSnapshot + 1);
+        
+        // Check status is Expired
+        vm.expectRevert(RecoveryAction.EscapeExpired.selector);
+        vm.prank(owner);
+        recoveryAction.escapeOwner(address(mockValidator));
+    }
+    
     // ==================== Edge Cases Tests ====================
 
     function testCannotCompleteNonExistentEscapeOwner() external {
